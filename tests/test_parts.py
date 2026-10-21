@@ -14,6 +14,55 @@ def test_formats_and_leading_zeroes():
     assert parse_payload('"Bracket, large",001,B-12').name == "Bracket, large"
 
 
+@pytest.mark.parametrize("payload", [
+    "Part Name: Steel Bracket\nPart ID: 001\nBin Number: B-12",
+    "Part Name: Steel Bracket, Part ID: 001, BIN Number: B-12",
+    "PART_ID=001 | BIN_NO=B-12 | PartName=Steel Bracket",
+    "PartName: Steel Bracket PartID: 001 Bin: B-12",
+    "Part Name: Steel Bracket; Part No.: 001; Bin No.: B-12",
+    '{"Part Name":"Steel Bracket","Part ID":"001","BIN Number":"B-12"}',
+    '{"PART-NAME":"Steel Bracket","PartNumber":"001","BinNo":"B-12"}',
+    '\ufeff{"part_name":"Steel Bracket","part_id":"001","bin_number":"B-12"}',
+])
+def test_labelled_formats(payload):
+    assert parse_payload(payload) == Part("Steel Bracket", "001", "B-12")
+
+
+@pytest.mark.parametrize("payload,expected", [
+    ("nut-0124-3", Part("nut", "0124", "3")),
+    ("  nut-0124-3  ", Part("nut", "0124", "3")),
+    ("hex-nut-0124-A3", Part("hex-nut", "0124", "A3")),
+    ("Steel Bracket-0001-03", Part("Steel Bracket", "0001", "03")),
+])
+def test_compact_labels(payload, expected):
+    assert parse_payload(payload) == expected
+
+
+@pytest.mark.parametrize("payload", [
+    "nut-0124", "nut--3", "-0124-3", "nut-0124-", "https://example.com/nut-0124-3",
+    "Part Name: Nut; Part ID: 001", "Part Name: Nut; Part ID: ; Bin: 3",
+    "Part Name: Nut; Part ID: 001; Part No: 002; Bin: 3",
+    '{"part_name":"Nut","PartName":"Bolt","part_id":"001","bin_number":"3"}',
+    '{"part_name":"Nut","part_id":"001","part_id":"002","bin_number":"3"}',
+])
+def test_incomplete_or_ambiguous_labels_rejected(payload):
+    with pytest.raises(ValueError):
+        parse_payload(payload)
+
+
+def test_compact_duplicate_matches_json_id_after_restart(tmp_path):
+    path = tmp_path / "parts.xlsx"
+    assert ExcelStore(path).add(parse_payload("nut-0124-3")).added
+    same = parse_payload('{"part_name":"nut","part_id":"0124","bin_number":"3"}')
+    assert not ExcelStore(path).add(same).added
+    assert not ExcelStore(path).add(parse_payload("nut-0124-3")).added
+    wb = load_workbook(path)
+    ws = wb["manufacturing"]
+    assert ws.max_row == 2
+    assert tuple(cell.value for cell in ws[2])[:3] == ("nut", "0124", "3")
+    wb.close()
+
+
 @pytest.mark.parametrize("payload", ["", "random text", "a,b", "a,b,c,d", "{bad}",
                                       '{"part_name":"A"}',
                                       '{"part_name":"A","part_id":1,"bin_number":"B"}',

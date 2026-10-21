@@ -12,7 +12,7 @@ from PyQt6.QtCore import QPoint, QPointF, Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QImage, QPainter, QPen, QPixmap, QPolygonF
 from PyQt6.QtWidgets import (
     QApplication, QComboBox, QFileDialog, QHBoxLayout, QLabel, QLineEdit,
-    QMainWindow, QPushButton, QSpinBox, QVBoxLayout, QWidget,
+    QMainWindow, QPlainTextEdit, QPushButton, QSpinBox, QVBoxLayout, QWidget,
 )
 
 from parts import ExcelStore
@@ -23,6 +23,7 @@ class CameraWorker(QThread):
     frame_ready = pyqtSignal(object, object)
     notice = pyqtSignal(str)
     recorded = pyqtSignal(object, str)
+    decoded = pyqtSignal(str)
 
     def __init__(self, camera, output, backend):
         super().__init__()
@@ -61,8 +62,9 @@ class CameraWorker(QThread):
                         if detection.payload in recent:
                             continue
                         recent[detection.payload] = now
+                        self.decoded.emit(detection.payload)
                         if detection.part is None:
-                            self.notice.emit("Unrecognized label: " + detection.error)
+                            self.notice.emit("QR decoded, but its fields could not be read: " + detection.error)
                             continue
                         try:
                             result = store.add(detection.part)
@@ -131,6 +133,12 @@ class MainWindow(QMainWindow):
         self.status.setTextFormat(Qt.TextFormat.PlainText)
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
+        layout.addWidget(QLabel("Decoded QR text (select and copy to troubleshoot a label):"))
+        self.payload = QPlainTextEdit()
+        self.payload.setReadOnly(True)
+        self.payload.setMaximumHeight(85)
+        self.payload.setPlaceholderText("The most recently decoded QR text will appear here.")
+        layout.addWidget(self.payload)
 
     def choose_file(self):
         path, _ = QFileDialog.getSaveFileName(self, "Select workbook", self.output.text(), "Excel (*.xlsx)")
@@ -151,6 +159,7 @@ class MainWindow(QMainWindow):
         self.worker.frame_ready.connect(self.show_frame)
         self.worker.notice.connect(self.status.setText)
         self.worker.recorded.connect(self.show_record)
+        self.worker.decoded.connect(self.payload.setPlainText)
         self.worker.finished.connect(self.worker_finished)
         self.worker.start()
 

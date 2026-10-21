@@ -43,6 +43,17 @@ fails, the UI reports the error and retries while the label remains visible.
 
 ## QR label contents
 
+Compact labels such as **`nut-0124-3`** are supported directly:
+
+| QR text | Part Name | Part ID | BIN Number |
+| --- | --- | --- | --- |
+| `nut-0124-3` | nut | 0124 | 3 |
+| `hex-nut-0124-A3` | hex-nut | 0124 | A3 |
+
+This format is `part-name-numericID-bin`, split at the last two hyphens.
+Leading zeroes in the ID are preserved. The bin is one alphanumeric token; use
+JSON or labelled text for IDs containing letters or bins containing hyphens.
+
 Encode this JSON as text in each QR code. All three values must be strings, so
 IDs such as `001` retain their leading zeroes.
 
@@ -51,7 +62,25 @@ IDs such as `001` retain their leading zeroes.
 ```
 
 A single CSV row is also supported: `Steel Bracket,P-001,B-12`. Quote fields
-containing commas. Plain IDs, URLs and arbitrary labels are rejected; no OCR or
+containing commas. JSON keys also accept capitalization, spaces, hyphens and
+underscores, for example `Part Name`, `Part ID` and `BIN Number`.
+
+Human-readable labelled text is supported, in any field order:
+
+```text
+Part Name: Steel Bracket
+Part ID: P-001
+Bin Number: B-12
+```
+
+Labels can use `:` or `=`, with fields separated by newlines, commas, semicolons,
+pipes or spaces. `PartName`, `Part No`, `Part Number`, `Bin No` and `Bin` are also
+recognized. Repeated labels are rejected to avoid saving ambiguous details.
+Values must still be strings in JSON. If a QR code is decoded but cannot be
+parsed, the screen shows the specific field error and the decoded text in a
+copyable box. Use that box to check what is actually inside the QR code.
+
+Plain IDs, URLs and arbitrary labels are rejected; no OCR or
 object recognition is performed. Fields must be nonempty, without control
 characters, and at most 256 characters each.
 

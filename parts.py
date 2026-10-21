@@ -36,23 +36,80 @@ class Part:
         object.__setattr__(self, "bin_number", self.bin_number.strip())
 
 
+FIELD_ALIASES = {
+    "partname": "name",
+    "partid": "part_id",
+    "partnumber": "part_id",
+    "partno": "part_id",
+    "binnumber": "bin_number",
+    "binno": "bin_number",
+    "bin": "bin_number",
+}
+LABEL = re.compile(
+    r"(?<![\w])(?P<key>part[ _-]*(?:name|id|number|no\.?)|"
+    r"bin(?:[ _-]*(?:number|no\.?))?)\s*[:=][ \t]*",
+    re.IGNORECASE,
+)
+COMPACT_LABEL = re.compile(
+    r"(?P<name>\w[\w .-]*)-(?P<part_id>[0-9]+)-(?P<bin_number>[A-Za-z0-9]+)"
+)
+
+
+def _part_from_fields(fields) -> Part:
+    values = {}
+    for key, value in fields:
+        normalized = re.sub(r"[\s_.-]", "", key).casefold()
+        field = FIELD_ALIASES.get(normalized)
+        if field is None:
+            continue
+        if field in values:
+            raise ValueError(f"QR contains more than one value for {key}; use one per field.")
+        values[field] = value
+    missing = [label for field, label in (("name", "Part Name"), ("part_id", "Part ID"),
+                                         ("bin_number", "BIN Number")) if field not in values]
+    if missing:
+        raise ValueError("QR is missing fields: " + ", ".join(missing))
+    return Part(**values)
+
+
+def _json_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"Duplicate JSON field: {key}")
+        result[key] = value
+    return result
+
+
 def parse_payload(payload: str) -> Part:
-    """Accept documented JSON keys or one CSV row: name,id,bin."""
-    payload = payload.strip()
+    """Read JSON, labelled text, name-numericID-bin, or one CSV row."""
+    payload = payload.lstrip("\ufeff").strip()
     if len(payload) > 4096:
         raise ValueError("QR payload is too long.")
     if payload.startswith("{"):
         try:
-            obj = json.loads(payload)
-            return Part(obj["part_name"], obj["part_id"], obj["bin_number"])
-        except (json.JSONDecodeError, KeyError, TypeError) as exc:
-            raise ValueError("QR JSON needs string fields: part_name, part_id, bin_number.") from exc
+            obj = json.loads(payload, object_pairs_hook=_json_object)
+        except json.JSONDecodeError as exc:
+            raise ValueError("QR contains invalid JSON; check quotes and punctuation.") from exc
+        return _part_from_fields(obj.items())
+    labels = list(LABEL.finditer(payload))
+    # Quoted CSV is unambiguously positional, even if the part name contains a label.
+    if labels and not payload.startswith('"'):
+        fields = []
+        for index, label in enumerate(labels):
+            end = labels[index + 1].start() if index + 1 < len(labels) else len(payload)
+            value = payload[label.end():end].strip().rstrip(",;|").strip()
+            fields.append((label["key"], value))
+        return _part_from_fields(fields)
+    compact = COMPACT_LABEL.fullmatch(payload)
+    if compact:
+        return Part(**compact.groupdict())
     try:
         rows = list(csv.reader(io.StringIO(payload), strict=True))
     except csv.Error as exc:
         raise ValueError("Invalid CSV label.") from exc
     if len(rows) != 1 or len(rows[0]) != 3:
-        raise ValueError("QR must contain JSON part details or CSV: Part Name,Part ID,BIN Number.")
+        raise ValueError("QR needs Part Name, Part ID and BIN Number as JSON, labelled text, CSV or name-ID-bin (nut-0124-3).")
     return Part(*rows[0])
 
 
